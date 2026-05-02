@@ -6,6 +6,7 @@ use std::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpSocket, TcpStream, lookup_host},
+    time::{Duration, timeout},
 };
 
 #[derive(Clone)]
@@ -175,14 +176,20 @@ async fn connect_and_relay(
 
         let socket = TcpSocket::new_v6()?;
         socket.bind(SocketAddr::new(IpAddr::V6(bind_ip), 0))?;
-        match socket.connect(addr).await {
-            Ok(mut server) => {
+        match timeout(Duration::from_secs(5), socket.connect(addr)).await {
+            Ok(Ok(mut server)) => {
                 send_reply(client, 0x00, server.local_addr().ok()).await?;
                 tokio::io::copy_bidirectional(client, &mut server).await?;
                 return Ok(());
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 last_err = Some(e);
+            }
+            Err(_) => {
+                last_err = Some(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("connect to {addr} timed out"),
+                ));
             }
         }
     }
